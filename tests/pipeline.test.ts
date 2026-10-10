@@ -212,3 +212,20 @@ describe("recording proxy", () => {
     expect((await fetchRecording("a", null, "k", audio(500) as any)).status).toBe(502);
   });
 });
+
+describe("email provider selection", () => {
+  it("auto-detects resend, then gmail; honours EMAIL_PROVIDER", async () => {
+    const { emailProvider } = await import("@/lib/integrations");
+    const keys = ["EMAIL_PROVIDER", "RESEND_API_KEY", "GMAIL_USER", "GMAIL_APP_PASSWORD"];
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    keys.forEach((k) => delete process.env[k]);
+    expect(emailProvider()).toBeNull();
+    process.env.GMAIL_USER = "a@gmail.com"; process.env.GMAIL_APP_PASSWORD = "x";
+    expect(emailProvider()).toBe("gmail");
+    process.env.RESEND_API_KEY = "re_x";
+    expect(emailProvider()).toBe("resend");
+    process.env.EMAIL_PROVIDER = "gmail";
+    expect(emailProvider()).toBe("gmail");
+    keys.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k])));
+  });
+});

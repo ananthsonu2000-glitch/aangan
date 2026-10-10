@@ -6,10 +6,29 @@ import { buildEmail, buildTelegram, buildHubspotContact, buildHubspotDeal, type 
 const appUrl = () => process.env.APP_URL || "http://localhost:3000";
 
 // ---------- Notifications ----------
+/** Provider: EMAIL_PROVIDER=gmail|resend. Default: Resend if RESEND_API_KEY is set, otherwise Gmail SMTP if GMAIL_USER is set. */
+export function emailProvider(): "resend" | "gmail" | null {
+  const forced = process.env.EMAIL_PROVIDER;
+  if (forced === "gmail" || forced === "resend") return forced;
+  if (process.env.RESEND_API_KEY) return "resend";
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) return "gmail";
+  return null;
+}
+
 async function sendEmailRaw(to: string, p: { subject: string; html: string; text: string }) {
+  const provider = emailProvider();
+  if (provider === "gmail") {
+    const user = process.env.GMAIL_USER;
+    const pass = process.env.GMAIL_APP_PASSWORD;
+    if (!user || !pass) throw new Error("GMAIL_USER / GMAIL_APP_PASSWORD not configured");
+    const nodemailer = (await import("nodemailer")).default;
+    const transport = nodemailer.createTransport({ host: "smtp.gmail.com", port: 465, secure: true, auth: { user, pass: pass.replace(/\s+/g, "") } });
+    await transport.sendMail({ from: process.env.EMAIL_FROM || `Aangan Studio <${user}>`, to, subject: p.subject, html: p.html, text: p.text });
+    return;
+  }
   const key = process.env.RESEND_API_KEY;
   const from = process.env.EMAIL_FROM;
-  if (!key || !from) throw new Error("RESEND_API_KEY / EMAIL_FROM not configured");
+  if (provider !== "resend" || !key || !from) throw new Error("Email not configured: set RESEND_API_KEY + EMAIL_FROM, or GMAIL_USER + GMAIL_APP_PASSWORD");
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
