@@ -15,6 +15,7 @@ export type NormalizedCall = {
   startedAt: Date | null;
   durationSec: number | null;
   agreedMeetingTimeHint: string | null;
+  recordingUrl: string | null;
   vaaniExtracted: Record<string, unknown>;
 };
 
@@ -106,6 +107,7 @@ export function normalizeVaaniPayload(body: Json): NormalizedCall {
     startedAt,
     durationSec,
     agreedMeetingTimeHint: entities.meeting_time ?? entities.appointment_time ?? entities.preferred_time ?? pick(d, ["meeting_time", "agreed_time", "appointment_time"]) ?? null,
+    recordingUrl: ((u: unknown) => (typeof u === "string" && /^https?:\/\//i.test(u) ? u : null))(pick(d, ["recording_url", "recordingUrl", "recording", "audio_url", "call.recording_url"])),
     vaaniExtracted: { ...entities, ...(Object.keys(dispositions).length ? { dispositions } : {}), ...(d.summary ? { vaani_summary: d.summary } : {}) },
   };
 }

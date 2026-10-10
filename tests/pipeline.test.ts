@@ -158,6 +158,7 @@ describe("real Vaani webhook format", () => {
     expect(n.transcript).toContain("3BHK in Baner");
     expect(n.callerName).toBe("Rahul Mehta");
     expect(n.callerNumber).toBe("9876543210");
+    expect(n.recordingUrl).toBe("https://x/r.mp3");
     expect(n.vaaniExtracted).toMatchObject({ vaani_summary: "Caller wants a 3BHK redesign." });
     expect(n.startedAt!.toISOString()).toBe("2026-10-10T10:26:43.000Z");
   });
@@ -169,5 +170,13 @@ describe("real Vaani webhook format", () => {
     const body = '{"event": "webhook_test", "timestamp": "2026-10-10T10:04:37.982273+00:00"}';
     const sig = createHmac("sha256", "k").update(body).digest("hex");
     expect(verifySignature(body, new Headers({ "x-webhook-signature": `sha256=${sig}` }), "k", "x-vaani-signature")).toBe(true);
+  });
+});
+
+describe("recording url", () => {
+  it("is read from recording_url, ignored when missing or not http(s)", () => {
+    expect(normalizeVaaniPayload({ call_id: "a", recording_url: "https://cdn.example/a.mp3" }).recordingUrl).toBe("https://cdn.example/a.mp3");
+    expect(normalizeVaaniPayload({ call_id: "a" }).recordingUrl).toBeNull();
+    expect(normalizeVaaniPayload({ call_id: "a", recording_url: "javascript:alert(1)" }).recordingUrl).toBeNull();
   });
 });

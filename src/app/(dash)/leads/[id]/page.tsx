@@ -112,7 +112,16 @@ export default async function LeadDetail({ params }: { params: Promise<{ id: str
 
       <div className={card}>
         <h2 className="mb-2 font-medium">Call transcript{callRows.length > 1 ? "s" : ""}</h2>
-        {callRows.map((c) => <pre key={c.id} className="mb-3 whitespace-pre-wrap rounded-md bg-stone-50 p-3 text-xs leading-relaxed">{c.transcript ?? "(no transcript)"}</pre>)}
+        {callRows.map((c) => (
+          <div key={c.id} className="mb-4">
+            <div className="mb-1 flex items-center gap-3 text-xs text-stone-500">
+              <span>{c.startedAt?.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) ?? ""}{c.durationSec ? ` · ${Math.floor(c.durationSec / 60)}:${String(c.durationSec % 60).padStart(2, "0")}` : ""}</span>
+              {c.recordingUrl ? <a className="underline" href={c.recordingUrl} target="_blank" rel="noreferrer">Open / download recording</a> : <span>No recording received</span>}
+            </div>
+            {c.recordingUrl && <audio controls preload="none" src={c.recordingUrl} className="mb-2 w-full" />}
+            <pre className="whitespace-pre-wrap rounded-md bg-stone-50 p-3 text-xs leading-relaxed">{c.transcript ?? "(no transcript)"}</pre>
+          </div>
+        ))}
       </div>
     </div>
   );

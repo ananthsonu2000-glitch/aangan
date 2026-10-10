@@ -54,6 +54,7 @@ export const calls = pgTable(
     startedAt: timestamp("started_at", { withTimezone: true }),
     durationSec: integer("duration_sec"),
     agreedMeetingTimeHint: text("agreed_meeting_time_hint"),
+    recordingUrl: text("recording_url"),
     signatureValid: boolean("signature_valid").notNull(),
     processingStatus: text("processing_status", { enum: ["received", "processing", "done", "failed"] }).notNull().default("received"),
     processingError: text("processing_error"),

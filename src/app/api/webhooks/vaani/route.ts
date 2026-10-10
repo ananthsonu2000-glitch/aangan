@@ -35,21 +35,25 @@ export async function POST(req: Request) {
     .insert(calls)
     .values({
       externalCallId: n.externalCallId, rawPayload: body, transcript: n.transcript, callerNumber: normalizePhone(n.callerNumber),
-      startedAt: n.startedAt, durationSec: n.durationSec, agreedMeetingTimeHint: n.agreedMeetingTimeHint, signatureValid: true,
+      startedAt: n.startedAt, durationSec: n.durationSec, agreedMeetingTimeHint: n.agreedMeetingTimeHint, recordingUrl: n.recordingUrl, signatureValid: true,
     })
     .onConflictDoNothing() // Vaani retries are safe: same call id is stored once
     .returning({ id: calls.id });
 
   if (!row) {
-    // Same call id seen before. If the stored copy had no transcript (e.g. an early "call ended" event) and this one does
-    // (e.g. "post-processing"), upgrade the stored call and process it. Otherwise it is a plain duplicate.
+    // Same call id seen before (Vaani may send call_ended and call_postprocessing separately).
     const [existing] = await db().select().from(calls).where(eq(calls.externalCallId, n.externalCallId));
-    if (existing && !existing.transcript?.trim() && n.transcript?.trim()) {
-      await db().update(calls).set({ rawPayload: body, transcript: n.transcript, durationSec: n.durationSec ?? existing.durationSec, startedAt: n.startedAt ?? existing.startedAt, agreedMeetingTimeHint: n.agreedMeetingTimeHint ?? existing.agreedMeetingTimeHint, processingStatus: "received", processingError: null }).where(eq(calls.id, existing.id));
-      after(async () => { try { await processCall(existing.id); } catch (e) { console.error("processCall failed", existing.id, e); } });
-      return NextResponse.json({ ok: true, callId: existing.id, upgraded: true });
-    }
-    return NextResponse.json({ ok: true, duplicate: true });
+    if (!existing) return NextResponse.json({ ok: true, duplicate: true });
+    const needsTranscript = !existing.transcript?.trim() && !!n.transcript?.trim();
+    const needsRecording = !existing.recordingUrl && !!n.recordingUrl;
+    if (!needsTranscript && !needsRecording) return NextResponse.json({ ok: true, duplicate: true });
+    await db().update(calls).set({
+      recordingUrl: existing.recordingUrl ?? n.recordingUrl,
+      ...(needsTranscript ? { rawPayload: body, transcript: n.transcript, durationSec: n.durationSec ?? existing.durationSec, startedAt: n.startedAt ?? existing.startedAt, agreedMeetingTimeHint: n.agreedMeetingTimeHint ?? existing.agreedMeetingTimeHint, processingStatus: "received" as const, processingError: null } : {}),
+    }).where(eq(calls.id, existing.id));
+    // Only (re)process when we newly got the transcript; a late recording just attaches to the call.
+    if (needsTranscript) after(async () => { try { await processCall(existing.id); } catch (e) { console.error("processCall failed", existing.id, e); } });
+    return NextResponse.json({ ok: true, callId: existing.id, upgraded: true });
   }
   // No transcript yet (e.g. a bare call_ended): keep it, and process when the post-processing event arrives (see upgrade above).
   if (!n.transcript?.trim()) return NextResponse.json({ ok: true, callId: row.id, awaitingTranscript: true });
