@@ -6,6 +6,7 @@ import { evaluateLead } from "@/lib/gemini";
 import { pickAssignee, roleForStatus } from "@/lib/assignment";
 import { buildEmail, buildTelegram, buildHubspotContact, buildHubspotDeal, type LeadView } from "@/lib/payloads";
 import { buildCalendarEvent } from "@/lib/integrations";
+import { fetchRecording } from "@/lib/recording";
 import { SAMPLE_CALLS, evalJson } from "./fixtures";
 
 const lead: LeadView = {
@@ -178,5 +179,26 @@ describe("recording url", () => {
     expect(normalizeVaaniPayload({ call_id: "a", recording_url: "https://cdn.example/a.mp3" }).recordingUrl).toBe("https://cdn.example/a.mp3");
     expect(normalizeVaaniPayload({ call_id: "a" }).recordingUrl).toBeNull();
     expect(normalizeVaaniPayload({ call_id: "a", recording_url: "javascript:alert(1)" }).recordingUrl).toBeNull();
+  });
+});
+
+describe("recording proxy", () => {
+  const audio = (status = 200) => async () => new Response("AUDIO", { status, headers: { "content-type": "audio/ogg", "content-length": "5" } });
+  it("sends X-API-Key + Range upstream and streams audio back without exposing the key", async () => {
+    let seen: any;
+    const f: any = async (url: string, init: any) => { seen = { url, init }; return audio()(); };
+    const r = await fetchRecording("webrtc-1/x y", "bytes=0-", "vaani_secret", f);
+    expect(seen.url).toBe("https://api.vaanivoice.ai/api/stream/webrtc-1%2Fx%20y");
+    expect(seen.init.headers["X-API-Key"]).toBe("vaani_secret");
+    expect(seen.init.headers.Range).toBe("bytes=0-");
+    expect(r.status).toBe(200);
+    expect(r.headers.get("content-type")).toBe("audio/ogg");
+    expect([...r.headers.values()].join(" ")).not.toContain("vaani_secret");
+    expect(await r.text()).toBe("AUDIO");
+  });
+  it("maps missing key -> 503, upstream 404 -> 404, other errors -> 502", async () => {
+    expect((await fetchRecording("a", null, undefined)).status).toBe(503);
+    expect((await fetchRecording("a", null, "k", audio(404) as any)).status).toBe(404);
+    expect((await fetchRecording("a", null, "k", audio(500) as any)).status).toBe(502);
   });
 });

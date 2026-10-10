@@ -25,6 +25,10 @@ async function markDone(id: string) {
   revalidatePath(`/leads/${id}`);
 }
 
+// Prefer our authenticated proxy to Vaani's API (needs VAANI_API_KEY); fall back to a URL delivered by webhook. Simulated calls have no audio.
+const recSrc = (c: { id: string; externalCallId: string; recordingUrl: string | null }) =>
+  c.externalCallId.startsWith("sim-") ? null : process.env.VAANI_API_KEY ? `/api/calls/${c.id}/recording` : c.recordingUrl;
+
 const Field = ({ k, v }: { k: string; v: string | number | null | undefined }) => (
   <div><dt className="text-xs text-stone-500">{k}</dt><dd className="text-sm">{v ?? "—"}</dd></div>
 );
@@ -116,9 +120,9 @@ export default async function LeadDetail({ params }: { params: Promise<{ id: str
           <div key={c.id} className="mb-4">
             <div className="mb-1 flex items-center gap-3 text-xs text-stone-500">
               <span>{c.startedAt?.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" }) ?? ""}{c.durationSec ? ` · ${Math.floor(c.durationSec / 60)}:${String(c.durationSec % 60).padStart(2, "0")}` : ""}</span>
-              {c.recordingUrl ? <a className="underline" href={c.recordingUrl} target="_blank" rel="noreferrer">Open / download recording</a> : <span>No recording received</span>}
+              {recSrc(c) ? <a className="underline" href={recSrc(c)!} target="_blank" rel="noreferrer">Open / download recording</a> : <span>No recording available</span>}
             </div>
-            {c.recordingUrl && <audio controls preload="none" src={c.recordingUrl} className="mb-2 w-full" />}
+            {recSrc(c) && <audio controls preload="none" src={recSrc(c)!} className="mb-2 w-full" />}
             <pre className="whitespace-pre-wrap rounded-md bg-stone-50 p-3 text-xs leading-relaxed">{c.transcript ?? "(no transcript)"}</pre>
           </div>
         ))}
