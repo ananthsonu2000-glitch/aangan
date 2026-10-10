@@ -268,3 +268,14 @@ describe("assignment fallback", () => {
     expect(pickWithFallback([e("a", "designer", false)], "qualified")).toBeNull();
   });
 });
+
+describe("voice-agent booking mode", () => {
+  it("CALENDAR_PROVIDER=none selects voice_agent even when a Cal.com key exists (no double booking)", () => {
+    const saved = { p: process.env.CALENDAR_PROVIDER, k: process.env.CALCOM_API_KEY };
+    process.env.CALCOM_API_KEY = "cal_x";
+    process.env.CALENDAR_PROVIDER = "none";
+    expect(calendarProvider()).toBe("voice_agent");
+    saved.p === undefined ? delete process.env.CALENDAR_PROVIDER : (process.env.CALENDAR_PROVIDER = saved.p);
+    saved.k === undefined ? delete process.env.CALCOM_API_KEY : (process.env.CALCOM_API_KEY = saved.k);
+  });
+});

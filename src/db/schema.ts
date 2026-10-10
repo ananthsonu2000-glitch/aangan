@@ -28,7 +28,7 @@ export const leads = pgTable(
     timeline: text("timeline"),
     designRequirement: text("design_requirement"),
     meetingTime: timestamp("meeting_time", { withTimezone: true }),
-    calendarStatus: text("calendar_status", { enum: ["none", "pending_config", "created", "failed"] }).notNull().default("none"),
+    calendarStatus: text("calendar_status", { enum: ["none", "pending_config", "created", "failed", "voice_agent"] }).notNull().default("none"),
     calendarEventId: text("calendar_event_id"),
     calendarLink: text("calendar_link"),
     assignedToId: uuid("assigned_to_id").references(() => employees.id),

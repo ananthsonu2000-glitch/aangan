@@ -27,7 +27,7 @@ export function LeadTable({ rows, empty = "No leads yet." }: { rows: LeadRow[]; 
               <td className="px-3 py-2 tabular-nums">{l.score ?? "—"}</td>
               <td className="px-3 py-2"><StatusBadge status={l.status} /></td>
               <td className="px-3 py-2">{l.assigneeName ?? "—"}</td>
-              <td className="px-3 py-2">{fmt(l.meetingTime)}{l.meetingTime && l.calendarStatus !== "created" && <div className="text-xs text-amber-700">invite: {l.calendarStatus.replace("_", " ")}</div>}</td>
+              <td className="px-3 py-2">{fmt(l.meetingTime)}{l.meetingTime && l.calendarStatus === "voice_agent" && <div className="text-xs text-stone-500">booked live by voice agent</div>}{l.meetingTime && l.calendarStatus !== "created" && l.calendarStatus !== "voice_agent" && <div className="text-xs text-amber-700">invite: {l.calendarStatus.replace("_", " ")}</div>}</td>
               <td className="px-3 py-2 text-stone-500">{fmt(l.createdAt)}</td>
             </tr>
           ))}

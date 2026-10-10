@@ -70,7 +70,7 @@ export default async function LeadDetail({ params }: { params: Promise<{ id: str
           <Field k="Location" v={lead.location} /><Field k="Project type" v={lead.projectType} />
           <Field k="Budget" v={lead.budget} /><Field k="Timeline" v={lead.timeline} />
           <div className="col-span-2"><Field k="Design requirement" v={lead.designRequirement} /></div>
-          <div className="col-span-2"><Field k="Agreed meeting" v={meeting ? `${meeting} · invite: ${lead.calendarStatus.replace("_", " ")}` : "none agreed"} />{lead.calendarLink && <a className="text-xs underline" href={lead.calendarLink}>Open calendar event</a>}</div>
+          <div className="col-span-2"><Field k="Agreed meeting" v={meeting ? `${meeting} · ${lead.calendarStatus === "voice_agent" ? "booked live by the voice agent (verify in Cal.com)" : `invite: ${lead.calendarStatus.replace("_", " ")}`}` : "none agreed"} />{lead.calendarLink && <a className="text-xs underline" href={lead.calendarLink}>Open calendar event</a>}</div>
         </dl>
         <div className={`${card} space-y-2`}>
           <Field k="Assigned to" v={assignee ? `${assignee.name} (${assignee.role.replace("_", " ")})` : "unassigned"} />

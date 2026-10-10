@@ -151,8 +151,9 @@ export async function syncToHubspot(lead: Lead, assigneeName: string | null) {
 export const googleConfigured = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
 
 /** CALENDAR_PROVIDER=calcom|google forces one. Default: Cal.com if CALCOM_API_KEY is set, else Google if configured, else none (intent is stored). */
-export function calendarProvider(): "calcom" | "google" | null {
+export function calendarProvider(): "calcom" | "google" | "voice_agent" | null {
   const forced = process.env.CALENDAR_PROVIDER;
+  if (forced === "none" || forced === "voice_agent") return "voice_agent"; // the Vaani agent books live; we never create a second booking
   if (forced === "calcom") return process.env.CALCOM_API_KEY ? "calcom" : null;
   if (forced === "google") return googleConfigured() ? "google" : null;
   if (process.env.CALCOM_API_KEY) return "calcom";
@@ -221,7 +222,12 @@ async function createCalcomBooking(lead: Lead, designer: Designer) {
 
 export async function createCalendarInvite(lead: Lead, designer: Designer) {
   if (!lead.meetingTime || lead.calendarStatus === "created") return;
-  if (calendarProvider() === "calcom") return createCalcomBooking(lead, designer);
+  const provider = calendarProvider();
+  if (provider === "voice_agent") {
+    await db().update(leads).set({ calendarStatus: "voice_agent" }).where(eq(leads.id, lead.id));
+    return;
+  }
+  if (provider === "calcom") return createCalcomBooking(lead, designer);
   return createGoogleInvite(lead, designer?.email ?? null);
 }
 
