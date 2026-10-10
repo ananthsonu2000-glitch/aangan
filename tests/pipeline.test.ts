@@ -5,7 +5,7 @@ import { parseEvaluation, decideStatus } from "@/lib/qualification";
 import { evaluateLead } from "@/lib/gemini";
 import { pickAssignee, roleForStatus } from "@/lib/assignment";
 import { buildEmail, buildTelegram, buildHubspotContact, buildHubspotDeal, type LeadView } from "@/lib/payloads";
-import { buildCalendarEvent } from "@/lib/integrations";
+import { buildCalendarEvent, buildCalcomBooking, calendarProvider } from "@/lib/integrations";
 import { fetchRecording } from "@/lib/recording";
 import { SAMPLE_CALLS, evalJson } from "./fixtures";
 
@@ -226,6 +226,30 @@ describe("email provider selection", () => {
     expect(emailProvider()).toBe("resend");
     process.env.EMAIL_PROVIDER = "gmail";
     expect(emailProvider()).toBe("gmail");
+    keys.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k])));
+  });
+});
+
+describe("Cal.com booking", () => {
+  const l: any = { id: "lead-1", name: "Rahul", phone: "+919876543210", email: null, projectType: "3BHK", location: "Baner", meetingTime: new Date("2026-10-13T05:30:00Z") };
+  it("builds a v2 booking body in UTC with attendee tz/phone and lead metadata", () => {
+    const b = buildCalcomBooking(l, 42);
+    expect(b).toMatchObject({ start: "2026-10-13T05:30:00.000Z", eventTypeId: 42, attendee: { name: "Rahul", timeZone: "Asia/Kolkata", phoneNumber: "+919876543210" }, metadata: { leadId: "lead-1" } });
+    expect((b.attendee as any).email).toBeUndefined();
+  });
+  it("uses the lead email, else the fallback email", () => {
+    expect((buildCalcomBooking({ ...l, email: "r@x.com" }, 1, "fb@x.com").attendee as any).email).toBe("r@x.com");
+    expect((buildCalcomBooking(l, 1, "fb@x.com").attendee as any).email).toBe("fb@x.com");
+  });
+  it("selects provider: cal.com when its key is set; forced google without config is none", () => {
+    const keys = ["CALENDAR_PROVIDER", "CALCOM_API_KEY", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN"];
+    const saved = Object.fromEntries(keys.map((k) => [k, process.env[k]]));
+    keys.forEach((k) => delete process.env[k]);
+    expect(calendarProvider()).toBeNull();
+    process.env.CALCOM_API_KEY = "cal_x";
+    expect(calendarProvider()).toBe("calcom");
+    process.env.CALENDAR_PROVIDER = "google";
+    expect(calendarProvider()).toBeNull();
     keys.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k])));
   });
 });

@@ -26,7 +26,7 @@ async function saveRecipients(fd: FormData) {
 }
 async function updateEmployee(fd: FormData) {
   "use server";
-  await db().update(employees).set({ email: String(fd.get("email")), telegramChatId: String(fd.get("telegram") || "") || null, active: fd.get("active") === "on" }).where(eq(employees.id, String(fd.get("id"))));
+  await db().update(employees).set({ email: String(fd.get("email")), telegramChatId: String(fd.get("telegram") || "") || null, calcomEventTypeId: Number(fd.get("calcom")) || null, active: fd.get("active") === "on" }).where(eq(employees.id, String(fd.get("id"))));
   revalidatePath("/admin");
 }
 
@@ -48,6 +48,7 @@ export default async function Admin() {
             <span className="w-32 font-medium">{e.name}</span><span className="w-20 text-stone-500">{e.role.replace("_", " ")}</span>
             <input name="email" defaultValue={e.email} className={`${input} w-56`} />
             <input name="telegram" defaultValue={e.telegramChatId ?? ""} placeholder="Telegram chat id" className={`${input} w-40`} />
+            {e.role === "designer" && <input name="calcom" defaultValue={e.calcomEventTypeId ?? ""} placeholder="Cal.com event type id" className={`${input} w-44`} />}
             <label className="flex items-center gap-1"><input type="checkbox" name="active" defaultChecked={e.active} /> active</label>
             <button className="rounded-md border border-stone-300 px-2 py-1">Save</button>
           </form>

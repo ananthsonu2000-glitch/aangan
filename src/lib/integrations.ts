@@ -148,7 +148,17 @@ export async function syncToHubspot(lead: Lead, assigneeName: string | null) {
 }
 
 // ---------- Google Calendar (separate module; stores intent if not configured) ----------
-export const calendarConfigured = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
+export const googleConfigured = () => !!(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET && process.env.GOOGLE_REFRESH_TOKEN);
+
+/** CALENDAR_PROVIDER=calcom|google forces one. Default: Cal.com if CALCOM_API_KEY is set, else Google if configured, else none (intent is stored). */
+export function calendarProvider(): "calcom" | "google" | null {
+  const forced = process.env.CALENDAR_PROVIDER;
+  if (forced === "calcom") return process.env.CALCOM_API_KEY ? "calcom" : null;
+  if (forced === "google") return googleConfigured() ? "google" : null;
+  if (process.env.CALCOM_API_KEY) return "calcom";
+  if (googleConfigured()) return "google";
+  return null;
+}
 
 export function buildCalendarEvent(lead: Lead, designerEmail: string | null, durationMin = 60) {
   const start = lead.meetingTime!;
@@ -165,11 +175,61 @@ export function buildCalendarEvent(lead: Lead, designerEmail: string | null, dur
   };
 }
 
-export async function createCalendarInvite(lead: Lead, designerEmail: string | null) {
+type Designer = { email: string; calcomEventTypeId: number | null } | null;
+
+/** Cal.com v2 create-booking body. Attendee = the customer; the host is whoever owns the event type. */
+export function buildCalcomBooking(lead: Lead, eventTypeId: number, fallbackEmail?: string) {
+  const email = lead.email || fallbackEmail || undefined;
+  return {
+    start: lead.meetingTime!.toISOString(),
+    eventTypeId,
+    attendee: {
+      name: lead.name || "Aangan customer",
+      ...(email ? { email } : {}),
+      timeZone: "Asia/Kolkata",
+      ...(lead.phone ? { phoneNumber: lead.phone } : {}),
+      language: "en",
+    },
+    metadata: { leadId: lead.id, source: "aangan-lead-system", project: (lead.projectType ?? "").slice(0, 400), location: (lead.location ?? "").slice(0, 400) },
+  };
+}
+
+async function createCalcomBooking(lead: Lead, designer: Designer) {
+  const d = db();
+  const eventTypeId = designer?.calcomEventTypeId ?? (process.env.CALCOM_EVENT_TYPE_ID ? Number(process.env.CALCOM_EVENT_TYPE_ID) : NaN);
+  if (!Number.isFinite(eventTypeId)) {
+    await d.update(leads).set({ calendarStatus: "pending_config" }).where(eq(leads.id, lead.id));
+    return;
+  }
+  try {
+    const body = buildCalcomBooking(lead, eventTypeId, process.env.CALCOM_FALLBACK_EMAIL);
+    const res = await fetch("https://api.cal.com/v2/bookings", {
+      method: "POST",
+      headers: { authorization: `Bearer ${process.env.CALCOM_API_KEY}`, "cal-api-version": process.env.CALCOM_API_VERSION || "2026-02-25", "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const text = await res.text();
+    const json: any = text ? JSON.parse(text) : {};
+    if (!res.ok || json.status === "error") throw new Error(`Cal.com ${res.status}: ${text.slice(0, 400)}`);
+    const b = Array.isArray(json.data) ? json.data[0] : json.data;
+    await d.update(leads).set({ calendarStatus: "created", calendarEventId: b?.uid ?? String(b?.id ?? ""), calendarLink: b?.uid ? `https://app.cal.com/booking/${b.uid}` : null }).where(eq(leads.id, lead.id));
+  } catch (err) {
+    console.error("cal.com booking failed", err);
+    await d.update(leads).set({ calendarStatus: "failed" }).where(eq(leads.id, lead.id));
+  }
+}
+
+export async function createCalendarInvite(lead: Lead, designer: Designer) {
+  if (!lead.meetingTime || lead.calendarStatus === "created") return;
+  if (calendarProvider() === "calcom") return createCalcomBooking(lead, designer);
+  return createGoogleInvite(lead, designer?.email ?? null);
+}
+
+async function createGoogleInvite(lead: Lead, designerEmail: string | null) {
   const d = db();
   if (!lead.meetingTime) return;
   if (lead.calendarStatus === "created") return;
-  if (!calendarConfigured()) {
+  if (!googleConfigured()) {
     await d.update(leads).set({ calendarStatus: "pending_config" }).where(eq(leads.id, lead.id));
     return;
   }

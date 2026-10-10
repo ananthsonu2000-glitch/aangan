@@ -5,6 +5,7 @@ export const employees = pgTable("employees", {
   name: text("name").notNull(),
   email: text("email").notNull(),
   telegramChatId: text("telegram_chat_id"), // personal chat; falls back to the role group chat from env
+  calcomEventTypeId: integer("calcom_event_type_id"), // the designer Cal.com event type; falls back to CALCOM_EVENT_TYPE_ID
   role: text("role", { enum: ["designer", "front_desk", "admin"] }).notNull(),
   active: boolean("active").notNull().default(true),
   sortOrder: integer("sort_order").notNull().default(0),

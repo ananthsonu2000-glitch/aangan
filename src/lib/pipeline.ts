@@ -101,7 +101,7 @@ export async function processCall(callId: string) {
     await Promise.allSettled([
       notifyAssignee(view, assignee, role, extra.extraEmails ?? []),
       syncToHubspot(lead, assignee.name),
-      createCalendarInvite(lead, role === "designer" ? assignee.email : null),
+      createCalendarInvite(lead, role === "designer" ? assignee : null),
     ]);
     await d.update(calls).set({ processingStatus: "done", processingError: null }).where(eq(calls.id, callId));
     return { leadId, status: ev.status };
@@ -133,5 +133,5 @@ export async function resyncLead(leadId: string) {
   if (!lead) throw new Error("lead not found");
   const [assignee] = lead.assignedToId ? await d.select().from(employees).where(eq(employees.id, lead.assignedToId)) : [];
   await syncToHubspot(lead, assignee?.name ?? null);
-  if (lead.calendarStatus !== "none") await createCalendarInvite(lead, assignee?.role === "designer" ? assignee.email : null);
+  if (lead.calendarStatus !== "none") await createCalendarInvite(lead, assignee?.role === "designer" ? assignee : null);
 }
