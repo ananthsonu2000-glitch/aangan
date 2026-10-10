@@ -1,4 +1,4 @@
-import { and, eq, count, inArray, or, lt } from "drizzle-orm";
+import { and, eq, count, inArray, or, lt, isNotNull } from "drizzle-orm";
 import { db, calls, leads, employees, aiEvaluations, assignments, appConfig } from "@/db";
 import { evaluateLead } from "./gemini";
 import { decideStatus } from "./qualification";
@@ -37,6 +37,7 @@ export async function processCall(callId: string) {
   const d = db();
   const [call] = await d.select().from(calls).where(eq(calls.id, callId));
   if (!call) throw new Error("call not found");
+  if (!call.transcript || call.transcript.trim().length < 20) throw new Error("No usable transcript on call");
   await d.update(calls).set({ processingStatus: "processing", attempts: call.attempts + 1 }).where(eq(calls.id, callId));
   try {
     const n = normalizeVaaniPayload(call.rawPayload as any);
@@ -117,7 +118,7 @@ export async function retryStuckCalls(maxAttempts = 5) {
   const rows = await d
     .select()
     .from(calls)
-    .where(and(eq(calls.signatureValid, true), lt(calls.attempts, maxAttempts), or(eq(calls.processingStatus, "failed"), and(inArray(calls.processingStatus, ["received", "processing"]), lt(calls.receivedAt, stale)))));
+    .where(and(eq(calls.signatureValid, true), isNotNull(calls.transcript), lt(calls.attempts, maxAttempts), or(eq(calls.processingStatus, "failed"), and(inArray(calls.processingStatus, ["received", "processing"]), lt(calls.receivedAt, stale)))));
   const results = [];
   for (const c of rows) {
     try { results.push(await processCall(c.id)); } catch (e) { results.push({ error: String(e) }); }

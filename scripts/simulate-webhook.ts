@@ -10,7 +10,7 @@ async function main() {
   const secret = process.env.VAANI_WEBHOOK_SECRET ?? "";
   const res = await fetch(`${process.env.APP_URL ?? "http://localhost:3000"}/api/webhooks/vaani`, {
     method: "POST",
-    headers: { "content-type": "application/json", [process.env.VAANI_SIGNATURE_HEADER ?? "x-vaani-signature"]: createHmac("sha256", secret).update(body).digest("hex") },
+    headers: { "content-type": "application/json", [process.env.VAANI_SIGNATURE_HEADER ?? "x-webhook-signature"]: createHmac("sha256", secret).update(body).digest("hex") },
     body,
   });
   console.log(res.status, await res.text());

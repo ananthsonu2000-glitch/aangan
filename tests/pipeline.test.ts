@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { createHmac } from "node:crypto";
-import { normalizeVaaniPayload, normalizePhone, verifySignature } from "@/lib/vaani";
+import { normalizeVaaniPayload, normalizePhone, verifySignature, isTestEvent } from "@/lib/vaani";
 import { parseEvaluation, decideStatus } from "@/lib/qualification";
 import { evaluateLead } from "@/lib/gemini";
 import { pickAssignee, roleForStatus } from "@/lib/assignment";
@@ -18,11 +18,11 @@ describe("webhook intake", () => {
   const body = JSON.stringify(SAMPLE_CALLS.t01.payload);
   it("verifies HMAC signature, rejects tampering / missing secret", () => {
     const sig = createHmac("sha256", "s3cret").update(body).digest("hex");
-    expect(verifySignature(body, new Headers({ "x-vaani-signature": sig }), "s3cret")).toBe(true);
-    expect(verifySignature(body, new Headers({ "x-vaani-signature": `sha256=${sig}` }), "s3cret")).toBe(true);
-    expect(verifySignature(body + " ", new Headers({ "x-vaani-signature": sig }), "s3cret")).toBe(false);
+    expect(verifySignature(body, new Headers({ "x-webhook-signature": sig }), "s3cret")).toBe(true);
+    expect(verifySignature(body, new Headers({ "x-webhook-signature": `sha256=${sig}` }), "s3cret")).toBe(true);
+    expect(verifySignature(body + " ", new Headers({ "x-webhook-signature": sig }), "s3cret")).toBe(false);
     expect(verifySignature(body, new Headers(), "s3cret")).toBe(false);
-    expect(verifySignature(body, new Headers({ "x-vaani-signature": sig }), undefined)).toBe(false);
+    expect(verifySignature(body, new Headers({ "x-webhook-signature": sig }), undefined)).toBe(false);
   });
   it("normalizes payload and phone", () => {
     const n = normalizeVaaniPayload(SAMPLE_CALLS.t01.payload);
@@ -140,5 +140,34 @@ describe("Gemini model routing", () => {
     delete process.env.GEMINI_MODEL;
     delete process.env.GEMINI_FALLBACK_MODELS;
     expect(modelChain()[0]).toBe("gemini-3.8-flash");
+  });
+});
+
+describe("real Vaani webhook format", () => {
+  const real = {
+    event: "call_postprocessing_batch", timestamp: "2026-10-10T10:30:00+00:00",
+    events: [
+      { event: "call_ended", timestamp: "2026-10-10T10:29:59+00:00", data: { room_name: "webrtc-179", call_id: "webrtc-179", end_reason: "completed", call_duration: 197, technical_issue: false } },
+      { event: "call_postprocessing", call_id: "webrtc-179", timestamp: "2026-10-10T10:30:00+00:00", data: { call_id: "webrtc-179", call_duration: 197, summary: "Caller wants a 3BHK redesign.", entities: { customer_name: "Rahul Mehta", phone: "9876543210" }, dispositions: { call_disposition: "Interested" }, recording_url: "https://x/r.mp3", transcript: "Agent: Hello\nUser: I have a 3BHK in Baner" } },
+    ],
+  };
+  it("merges call_ended + call_postprocessing into one normalized call", () => {
+    const n = normalizeVaaniPayload(real);
+    expect(n.externalCallId).toBe("webrtc-179");
+    expect(n.durationSec).toBe(197);
+    expect(n.transcript).toContain("3BHK in Baner");
+    expect(n.callerName).toBe("Rahul Mehta");
+    expect(n.callerNumber).toBe("9876543210");
+    expect(n.vaaniExtracted).toMatchObject({ vaani_summary: "Caller wants a 3BHK redesign." });
+    expect(n.startedAt!.toISOString()).toBe("2026-10-10T10:26:43.000Z");
+  });
+  it("a bare call_ended has no transcript; the test ping is recognised", () => {
+    expect(normalizeVaaniPayload({ events: [real.events[0]] }).transcript).toBeNull();
+    expect(isTestEvent({ event: "webhook_test", events: [] })).toBe(true);
+  });
+  it("accepts the exact signed webhook_test captured from Vaani", () => {
+    const body = '{"event": "webhook_test", "timestamp": "2026-10-10T10:04:37.982273+00:00"}';
+    const sig = createHmac("sha256", "k").update(body).digest("hex");
+    expect(verifySignature(body, new Headers({ "x-webhook-signature": `sha256=${sig}` }), "k", "x-vaani-signature")).toBe(true);
   });
 });

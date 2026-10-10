@@ -21,12 +21,13 @@ export type NormalizedCall = {
 type Json = Record<string, any>;
 
 /**
- * Assumes HMAC-SHA256 (hex or base64) of the raw body in the signature header (optionally "sha256=" prefixed),
- * or the shared secret sent directly as a header value / bearer token. ADJUST once Vaani's scheme is confirmed.
+ * CONFIRMED from a real Vaani webhook test: header `x-webhook-signature: sha256=<hex>`, HMAC-SHA256 of the raw body.
+ * Also tolerates base64 / bearer for safety.
  */
-export function verifySignature(rawBody: string, headers: Headers, secret: string | undefined, headerName = "x-vaani-signature"): boolean {
+export function verifySignature(rawBody: string, headers: Headers, secret: string | undefined, headerName = "x-webhook-signature"): boolean {
   if (!secret) return false; // fail closed
-  const provided = (headers.get(headerName) ?? "").trim().replace(/^sha256=/i, "");
+  // Vaani sends x-webhook-signature. A configured header name is tried too, so a stale env value cannot break verification.
+  const provided = [headerName, "x-webhook-signature", "x-vaani-signature"].map((h) => (headers.get(h) ?? "").trim().replace(/^sha256=/i, "")).find(Boolean) ?? "";
   const bearer = (headers.get("authorization") ?? "").replace(/^Bearer\s+/i, "").trim();
   const safeEq = (a: string, b: string) => {
     const ab = Buffer.from(a);
@@ -63,23 +64,49 @@ function transcriptToText(t: unknown): string | null {
   return JSON.stringify(t);
 }
 
+/**
+ * CONFIRMED Vaani format (from the webhook test): a batch
+ *   { event, timestamp, events: [ { event: "call_ended", data: {...} }, { event: "call_postprocessing", call_id, data: { transcript, summary, entities, dispositions, recording_url, call_duration, ... } } ] }
+ * Single-event bodies ({ event, data }) are handled too. Post-processing data wins over call_ended data.
+ */
+function flatten(body: Json): { data: Json; timestamp: string | undefined; event: string | undefined } {
+  const events: Json[] | null = Array.isArray(body?.events) ? body.events : null;
+  if (events) {
+    const ended = events.find((e) => e?.event === "call_ended");
+    const post = events.find((e) => e?.event === "call_postprocessing");
+    return { data: { ...(ended?.data ?? {}), ...(post?.data ?? {}) }, timestamp: (post ?? ended ?? events[0])?.timestamp ?? body.timestamp, event: post ? "call_postprocessing" : ended?.event ?? events[0]?.event };
+  }
+  const data = body?.data && typeof body.data === "object" ? { ...body, ...body.data } : body;
+  return { data, timestamp: body?.timestamp, event: body?.event };
+}
+
+export function isTestEvent(body: Json): boolean {
+  return body?.event === "webhook_test";
+}
+
 export function normalizeVaaniPayload(body: Json): NormalizedCall {
-  const d: Json = body?.data && typeof body.data === "object" ? { ...body, ...body.data } : body;
-  const id = pick(d, ["call_id", "callId", "id", "call.id", "uuid", "conversation_id"]);
+  const { data: d, timestamp } = flatten(body);
+  const id = pick(d, ["call_id", "callId", "room_name", "id", "call.id", "uuid", "conversation_id"]);
   if (!id) throw new Error("Vaani payload has no call id (adapter needs updating for the real payload)");
-  const started = pick(d, ["started_at", "startedAt", "start_time", "call.started_at", "created_at", "timestamp"]);
-  const dur = pick(d, ["duration", "duration_sec", "duration_seconds", "call.duration", "call_duration"]);
-  const extracted = (pick(d, ["extracted_data", "extractedData", "variables", "analysis.data", "collected_data"]) ?? {}) as Json;
+  const dur = pick(d, ["call_duration", "duration", "duration_sec", "duration_seconds", "call.duration"]);
+  const durationSec = dur != null && !isNaN(Number(dur)) ? Math.round(Number(dur)) : null;
+  const ended = pick(d, ["ended_at", "end_time"]) ?? timestamp;
+  const startedExplicit = pick(d, ["started_at", "startedAt", "start_time", "call.started_at"]);
+  let startedAt: Date | null = null;
+  if (startedExplicit && !isNaN(Date.parse(startedExplicit))) startedAt = new Date(startedExplicit);
+  else if (ended && !isNaN(Date.parse(ended))) startedAt = new Date(Date.parse(ended) - (durationSec ?? 0) * 1000);
+  const entities = (pick(d, ["entities", "extracted_data", "extractedData", "variables", "collected_data"]) ?? {}) as Json;
+  const dispositions = (d.dispositions ?? {}) as Json;
   return {
     externalCallId: String(id),
     transcript: transcriptToText(pick(d, ["transcript", "call.transcript", "conversation", "messages"])),
-    callerNumber: pick(d, ["from", "caller_number", "customer_number", "phone", "phone_number", "call.from", "customer.number"]) ?? null,
-    callerName: pick(d, ["caller_name", "customer_name", "name", "customer.name"]) ?? extracted.name ?? null,
-    callerEmail: pick(d, ["email", "customer.email"]) ?? extracted.email ?? null,
-    startedAt: started && !isNaN(Date.parse(started)) ? new Date(started) : null,
-    durationSec: dur != null && !isNaN(Number(dur)) ? Math.round(Number(dur)) : null,
-    agreedMeetingTimeHint: pick(d, ["meeting_time", "agreed_time", "appointment_time", "extracted_data.meeting_time", "variables.meeting_time"]) ?? null,
-    vaaniExtracted: extracted,
+    callerNumber: pick(d, ["from", "from_number", "caller_number", "customer_number", "phone", "phone_number", "customer.number"]) ?? entities.phone ?? entities.customer_phone ?? entities.phone_number ?? null,
+    callerName: entities.customer_name ?? entities.name ?? pick(d, ["caller_name", "customer_name", "name"]) ?? null,
+    callerEmail: entities.email ?? pick(d, ["email", "customer.email"]) ?? null,
+    startedAt,
+    durationSec,
+    agreedMeetingTimeHint: entities.meeting_time ?? entities.appointment_time ?? entities.preferred_time ?? pick(d, ["meeting_time", "agreed_time", "appointment_time"]) ?? null,
+    vaaniExtracted: { ...entities, ...(Object.keys(dispositions).length ? { dispositions } : {}), ...(d.summary ? { vaani_summary: d.summary } : {}) },
   };
 }
 
