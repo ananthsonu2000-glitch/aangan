@@ -14,7 +14,8 @@
     "hubspot:setup": "tsx scripts/hubspot-setup.ts",
     "gen:defaults": "node scripts/gen-defaults.mjs",
     "simulate": "tsx scripts/simulate-webhook.ts",
-    "resync": "tsx scripts/resync-lead.ts"
+    "resync": "tsx scripts/resync-lead.ts",
+    "notify": "tsx scripts/notify-lead.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",
