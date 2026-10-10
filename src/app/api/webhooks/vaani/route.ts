@@ -1,4 +1,5 @@
 import { NextResponse, after } from "next/server";
+import { eq } from "drizzle-orm";
 import { db, calls } from "@/db";
 import { normalizeVaaniPayload, normalizePhone, verifySignature } from "@/lib/vaani";
 import { processCall } from "@/lib/pipeline";
@@ -29,7 +30,17 @@ export async function POST(req: Request) {
     .onConflictDoNothing() // Vaani retries are safe: same call id is stored once
     .returning({ id: calls.id });
 
-  if (!row) return NextResponse.json({ ok: true, duplicate: true });
+  if (!row) {
+    // Same call id seen before. If the stored copy had no transcript (e.g. an early "call ended" event) and this one does
+    // (e.g. "post-processing"), upgrade the stored call and process it. Otherwise it is a plain duplicate.
+    const [existing] = await db().select().from(calls).where(eq(calls.externalCallId, n.externalCallId));
+    if (existing && !existing.transcript?.trim() && n.transcript?.trim()) {
+      await db().update(calls).set({ rawPayload: body, transcript: n.transcript, durationSec: n.durationSec ?? existing.durationSec, startedAt: n.startedAt ?? existing.startedAt, agreedMeetingTimeHint: n.agreedMeetingTimeHint ?? existing.agreedMeetingTimeHint, processingStatus: "received", processingError: null }).where(eq(calls.id, existing.id));
+      after(async () => { try { await processCall(existing.id); } catch (e) { console.error("processCall failed", existing.id, e); } });
+      return NextResponse.json({ ok: true, callId: existing.id, upgraded: true });
+    }
+    return NextResponse.json({ ok: true, duplicate: true });
+  }
   // Ack fast, process after the response. If this dies, /api/cron/retry picks the call up.
   after(async () => { try { await processCall(row.id); } catch (e) { console.error("processCall failed", row.id, e); } });
   return NextResponse.json({ ok: true, callId: row.id });
