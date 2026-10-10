@@ -6,6 +6,8 @@ import { assignLead, resyncLead } from "@/lib/pipeline";
 import { retryFailedNotifications } from "@/lib/integrations";
 import { StatusBadge } from "../../lead-table";
 
+const HS_APP = process.env.HUBSPOT_APP_URL || "https://app.hubspot.com";
+
 export const dynamic = "force-dynamic";
 
 async function retry(id: string) {
@@ -74,7 +76,7 @@ export default async function LeadDetail({ params }: { params: Promise<{ id: str
           <Field k="Assigned to" v={assignee ? `${assignee.name} (${assignee.role.replace("_", " ")})` : "unassigned"} />
           <Field k="State" v={lead.assignmentState} />
           <Field k="HubSpot deal" v={lead.hubspotDealId ?? "not synced"} />
-          {portal && lead.hubspotDealId && <a className="text-xs underline" target="_blank" href={`https://app.hubspot.com/contacts/${portal}/record/0-3/${lead.hubspotDealId}`}>Open in HubSpot</a>}
+          {portal && lead.hubspotDealId && <a className="text-xs underline" target="_blank" href={`${HS_APP}/contacts/${portal}/record/0-3/${lead.hubspotDealId}`}>Open in HubSpot</a>}
         </div>
       </div>
 

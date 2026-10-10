@@ -3,6 +3,8 @@ import { db, leads, notifications, hubspotSyncLogs } from "@/db";
 import { LeadTable } from "./lead-table";
 import { listLeads } from "./queries";
 
+const HS_APP = process.env.HUBSPOT_APP_URL || "https://app.hubspot.com";
+
 export const dynamic = "force-dynamic";
 
 export default async function Overview() {
@@ -19,7 +21,7 @@ export default async function Overview() {
     <div className="space-y-6">
       <div className="flex items-end justify-between">
         <h1 className="text-xl font-semibold">Founder overview</h1>
-        {portal && <a className="text-sm underline" href={`https://app.hubspot.com/contacts/${portal}/deals`} target="_blank">Open pipeline in HubSpot →</a>}
+        {portal && <a className="text-sm underline" href={`${HS_APP}/contacts/${portal}/deals`} target="_blank">Open pipeline in HubSpot →</a>}
       </div>
       <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
         {tiles.map(([k, v]) => (
