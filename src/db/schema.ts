@@ -31,6 +31,7 @@ export const leads = pgTable(
     calendarStatus: text("calendar_status", { enum: ["none", "pending_config", "created", "failed", "voice_agent"] }).notNull().default("none"),
     calendarEventId: text("calendar_event_id"),
     calendarLink: text("calendar_link"),
+    calendarError: text("calendar_error"),
     assignedToId: uuid("assigned_to_id").references(() => employees.id),
     assignmentState: text("assignment_state", { enum: ["open", "done"] }).notNull().default("open"),
     founderSummary: text("founder_summary"),

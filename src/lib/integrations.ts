@@ -176,6 +176,17 @@ export function buildCalendarEvent(lead: Lead, designerEmail: string | null, dur
   };
 }
 
+/** Turn a Cal.com / Google error into a short, human reason that can be shown on the lead page. */
+export function friendlyCalError(err: unknown): string {
+  const m = String(err);
+  if (/can't be booked at the "start" time|not available|already has booking|409/i.test(m)) return "Requested time is outside availability or already taken. Pick another slot and book manually.";
+  if (/in the past/i.test(m)) return "Requested time was already in the past when the booking was attempted.";
+  if (/no open slot/i.test(m)) return "No open Cal.com slot within 3 days of the requested time.";
+  if (/401|403|unauthor|invalid api key/i.test(m)) return "Cal.com rejected the API key.";
+  if (/event type|404/i.test(m)) return "Cal.com event type not found. Check CALCOM_EVENT_TYPE_ID.";
+  return m.replace(/\s+/g, " ").slice(0, 220);
+}
+
 type Designer = { email: string; calcomEventTypeId: number | null } | null;
 
 /** Cal.com v2 create-booking body. Attendee = the customer; the host is whoever owns the event type. */
@@ -195,6 +206,28 @@ export function buildCalcomBooking(lead: Lead, eventTypeId: number, fallbackEmai
   };
 }
 
+/** Pure: the slot start closest to `desired` (ties go to the later slot). Returns an ISO string or null. */
+export function nearestSlot(starts: string[], desired: Date): string | null {
+  let best: { iso: string; diff: number } | null = null;
+  for (const iso of starts) {
+    const t = Date.parse(iso);
+    if (isNaN(t)) continue;
+    const diff = Math.abs(t - desired.getTime());
+    if (!best || diff < best.diff || (diff === best.diff && t > Date.parse(best.iso))) best = { iso: new Date(t).toISOString(), diff };
+  }
+  return best?.iso ?? null;
+}
+
+/** Open slots for the event type from the requested day through the next 3 days. */
+async function openSlots(eventTypeId: number, desired: Date): Promise<string[]> {
+  const day = (d: Date) => new Date(d.getTime() + 5.5 * 3600e3).toISOString().slice(0, 10); // IST calendar date
+  const url = `https://api.cal.com/v2/slots?eventTypeId=${eventTypeId}&start=${day(new Date(Math.max(Date.now(), desired.getTime() - 86400e3)))}&end=${day(new Date(desired.getTime() + 3 * 86400e3))}&timeZone=Asia/Kolkata`;
+  const res = await fetch(url, { headers: { authorization: `Bearer ${process.env.CALCOM_API_KEY}`, "cal-api-version": "2024-09-04" } });
+  if (!res.ok) throw new Error(`Cal.com slots ${res.status}: ${(await res.text()).slice(0, 200)}`);
+  const json: any = await res.json();
+  return Object.values(json.data ?? {}).flat().map((x: any) => x.start);
+}
+
 async function createCalcomBooking(lead: Lead, designer: Designer) {
   const d = db();
   const eventTypeId = designer?.calcomEventTypeId ?? (process.env.CALCOM_EVENT_TYPE_ID ? Number(process.env.CALCOM_EVENT_TYPE_ID) : NaN);
@@ -203,7 +236,11 @@ async function createCalcomBooking(lead: Lead, designer: Designer) {
     return;
   }
   try {
-    const body = buildCalcomBooking(lead, eventTypeId, process.env.CALCOM_FALLBACK_EMAIL);
+    const requested = lead.meetingTime!;
+    const slot = nearestSlot(await openSlots(eventTypeId, requested), requested);
+    if (!slot) throw new Error("No open slot found");
+    const booked = new Date(slot);
+    const body = buildCalcomBooking({ ...lead, meetingTime: booked }, eventTypeId, process.env.CALCOM_FALLBACK_EMAIL);
     const res = await fetch("https://api.cal.com/v2/bookings", {
       method: "POST",
       headers: { authorization: `Bearer ${process.env.CALCOM_API_KEY}`, "cal-api-version": process.env.CALCOM_API_VERSION || "2026-02-25", "content-type": "application/json" },
@@ -213,10 +250,15 @@ async function createCalcomBooking(lead: Lead, designer: Designer) {
     const json: any = text ? JSON.parse(text) : {};
     if (!res.ok || json.status === "error") throw new Error(`Cal.com ${res.status}: ${text.slice(0, 400)}`);
     const b = Array.isArray(json.data) ? json.data[0] : json.data;
-    await d.update(leads).set({ calendarStatus: "created", calendarEventId: b?.uid ?? String(b?.id ?? ""), calendarLink: b?.uid ? `https://app.cal.com/booking/${b.uid}` : null }).where(eq(leads.id, lead.id));
+    if (booked.getTime() !== requested.getTime()) {
+      const fmt = (x: Date) => x.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", dateStyle: "medium", timeStyle: "short" });
+      const note = `Note: customer asked for ${fmt(requested)}; booked the nearest open slot, ${fmt(booked)}.`;
+      await d.update(leads).set({ meetingTime: booked, employeeSummary: `${lead.employeeSummary ?? ""}\n${note}`.trim() }).where(eq(leads.id, lead.id));
+    }
+    await d.update(leads).set({ calendarStatus: "created", calendarError: null, calendarEventId: b?.uid ?? String(b?.id ?? ""), calendarLink: b?.uid ? `https://app.cal.com/booking/${b.uid}` : null }).where(eq(leads.id, lead.id));
   } catch (err) {
     console.error("cal.com booking failed", err);
-    await d.update(leads).set({ calendarStatus: "failed" }).where(eq(leads.id, lead.id));
+    await d.update(leads).set({ calendarStatus: "failed", calendarError: friendlyCalError(err) }).where(eq(leads.id, lead.id));
   }
 }
 
@@ -263,6 +305,6 @@ async function createGoogleInvite(lead: Lead, designerEmail: string | null) {
     await d.update(leads).set({ calendarStatus: "created", calendarEventId: created.id, calendarLink: created.htmlLink ?? null }).where(eq(leads.id, lead.id));
   } catch (err) {
     console.error("calendar failed", err);
-    await d.update(leads).set({ calendarStatus: "failed" }).where(eq(leads.id, lead.id));
+    await d.update(leads).set({ calendarStatus: "failed", calendarError: friendlyCalError(err) }).where(eq(leads.id, lead.id));
   }
 }

@@ -99,12 +99,14 @@ export async function processCall(callId: string) {
     role = assignee.role === "designer" ? "designer" : "front_desk";
 
     // 4. side effects — independent, each failure is logged and retryable, none blocks the others
+    // The booking runs first: it can move the meeting to the nearest open slot, and the messages should carry the real time.
+    await Promise.allSettled([createCalendarInvite(lead, role === "designer" ? assignee : null)]);
+    [lead] = await d.select().from(leads).where(eq(leads.id, leadId));
     const view: LeadView = lead;
     const extra = await getConfig<{ extraEmails?: string[] }>("notification_recipients", {});
     await Promise.allSettled([
       notifyAssignee(view, assignee, role, extra.extraEmails ?? []),
       syncToHubspot(lead, assignee.name),
-      createCalendarInvite(lead, role === "designer" ? assignee : null),
     ]);
     await d.update(calls).set({ processingStatus: "done", processingError: null }).where(eq(calls.id, callId));
     return { leadId, status: ev.status };

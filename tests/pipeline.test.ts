@@ -5,7 +5,7 @@ import { parseEvaluation, decideStatus } from "@/lib/qualification";
 import { evaluateLead } from "@/lib/gemini";
 import { pickAssignee, roleForStatus, pickWithFallback } from "@/lib/assignment";
 import { buildEmail, buildTelegram, buildHubspotContact, buildHubspotDeal, type LeadView } from "@/lib/payloads";
-import { buildCalendarEvent, buildCalcomBooking, calendarProvider } from "@/lib/integrations";
+import { buildCalendarEvent, buildCalcomBooking, calendarProvider, friendlyCalError, nearestSlot } from "@/lib/integrations";
 import { fetchRecording } from "@/lib/recording";
 import { SAMPLE_CALLS, evalJson } from "./fixtures";
 
@@ -278,4 +278,22 @@ describe("voice-agent booking mode", () => {
     saved.p === undefined ? delete process.env.CALENDAR_PROVIDER : (process.env.CALENDAR_PROVIDER = saved.p);
     saved.k === undefined ? delete process.env.CALCOM_API_KEY : (process.env.CALCOM_API_KEY = saved.k);
   });
+});
+
+describe("calendar error messages", () => {
+  it("explains the common Cal.com failures in plain words", () => {
+    expect(friendlyCalError(new Error("Cal.com 400: The event type can't be booked at the \"start\" time provided"))).toMatch(/outside availability/);
+    expect(friendlyCalError(new Error("Cal.com 409: User either already has booking at this time"))).toMatch(/already taken/);
+    expect(friendlyCalError(new Error("Cal.com 401: invalid api key"))).toMatch(/API key/);
+  });
+});
+
+describe("nearest Cal.com slot", () => {
+  const slots = ["2026-10-12T09:00:00.000+05:30", "2026-10-12T17:00:00.000+05:30", "2026-10-12T18:00:00.000+05:30", "2026-10-13T09:00:00.000+05:30"];
+  it("picks the exact slot when open, else the closest one", () => {
+    expect(nearestSlot(slots, new Date("2026-10-12T17:00:00+05:30"))).toBe("2026-10-12T11:30:00.000Z");
+    expect(nearestSlot(slots, new Date("2026-10-12T18:20:00+05:30"))).toBe("2026-10-12T12:30:00.000Z"); // 6pm IST
+    expect(nearestSlot(slots, new Date("2026-10-12T18:30:00+05:30"))).toBe("2026-10-12T12:30:00.000Z");
+  });
+  it("returns null when there are no slots", () => expect(nearestSlot([], new Date())).toBeNull());
 });
