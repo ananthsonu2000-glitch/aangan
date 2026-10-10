@@ -52,15 +52,21 @@ ${i.transcript}`;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function callModel(model: string, key: string, system: string, user: string): Promise<{ ok: true; text: string } | { ok: false; status: number; body: string }> {
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-    method: "POST",
-    headers: { "content-type": "application/json", "x-goog-api-key": key },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: [{ role: "user", parts: [{ text: user }] }],
-      generationConfig: { responseMimeType: "application/json", temperature: 0 },
-    }),
-  });
+  let res: Response;
+  try {
+    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-goog-api-key": key },
+      signal: AbortSignal.timeout(Number(process.env.GEMINI_TIMEOUT_MS) || 30000), // a slow model must not eat the whole function budget
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: user }] }],
+        generationConfig: { responseMimeType: "application/json", temperature: 0 },
+      }),
+    });
+  } catch (err) {
+    return { ok: false, status: 599, body: `network/timeout: ${String(err).slice(0, 200)}` };
+  }
   if (!res.ok) return { ok: false, status: res.status, body: (await res.text()).slice(0, 500) };
   const json: any = await res.json();
   const text = json?.candidates?.[0]?.content?.parts?.map((p: any) => p.text ?? "").join("");
