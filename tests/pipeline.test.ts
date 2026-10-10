@@ -191,10 +191,20 @@ describe("recording proxy", () => {
     expect(seen.url).toBe("https://api.vaanivoice.ai/api/stream/webrtc-1%2Fx%20y");
     expect(seen.init.headers["X-API-Key"]).toBe("vaani_secret");
     expect(seen.init.headers.Range).toBe("bytes=0-");
-    expect(r.status).toBe(200);
+    expect(r.status).toBe(206); // Vaani ignored Range, so the proxy slices (here: the whole file)
     expect(r.headers.get("content-type")).toBe("audio/ogg");
     expect([...r.headers.values()].join(" ")).not.toContain("vaani_secret");
     expect(await r.text()).toBe("AUDIO");
+  });
+  it("serves byte ranges itself when Vaani returns the full file", async () => {
+    const f: any = async () => new Response(new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]), { status: 200, headers: { "content-type": "audio/ogg" } });
+    const r = await fetchRecording("a", "bytes=2-5", "k", f);
+    expect(r.status).toBe(206);
+    expect(r.headers.get("content-range")).toBe("bytes 2-5/10");
+    expect([...new Uint8Array(await r.arrayBuffer())]).toEqual([2, 3, 4, 5]);
+    const tail = await fetchRecording("a", "bytes=7-", "k", f);
+    expect(tail.headers.get("content-range")).toBe("bytes 7-9/10");
+    expect((await fetchRecording("a", "bytes=50-", "k", f)).status).toBe(416);
   });
   it("maps missing key -> 503, upstream 404 -> 404, other errors -> 502", async () => {
     expect((await fetchRecording("a", null, undefined)).status).toBe(503);
