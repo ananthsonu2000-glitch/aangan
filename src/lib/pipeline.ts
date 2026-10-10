@@ -2,7 +2,7 @@ import { and, eq, count, inArray, or, lt, isNotNull } from "drizzle-orm";
 import { db, calls, leads, employees, aiEvaluations, assignments, appConfig } from "@/db";
 import { evaluateLead } from "./gemini";
 import { decideStatus } from "./qualification";
-import { pickAssignee, roleForStatus, type Strategy } from "./assignment";
+import { pickWithFallback, roleForStatus, type Strategy } from "./assignment";
 import { normalizePhone, normalizeVaaniPayload } from "./vaani";
 import { createCalendarInvite, notifyAssignee, syncToHubspot } from "./integrations";
 import type { LeadView } from "./payloads";
@@ -17,18 +17,20 @@ export async function assignLead(leadId: string, status: "qualified" | "needs_re
   const d = db();
   const role = roleForStatus(status);
   const strategy = (await getConfig<string>("assignment_strategy", process.env.ASSIGNMENT_STRATEGY || "round_robin")) as Strategy;
-  const pool = await d.select().from(employees).where(and(eq(employees.role, role), eq(employees.active, true)));
+  const pool = await d.select().from(employees).where(eq(employees.active, true));
   let openCounts: Record<string, number> = {};
   if (strategy === "least_loaded") {
     const rows = await d.select({ id: leads.assignedToId, n: count() }).from(leads).where(eq(leads.assignmentState, "open")).groupBy(leads.assignedToId);
     openCounts = Object.fromEntries(rows.map((r) => [r.id ?? "", Number(r.n)]));
   }
-  const chosen = pickAssignee(pool, strategy, openCounts);
-  if (!chosen) throw new Error(`No active ${role} available to assign`);
+  const pick = pickWithFallback(pool, status, strategy, openCounts);
+  if (!pick) throw new Error("No active employees to assign to (activate someone on the Admin page)");
+  const chosen = pick.assignee;
+  if (pick.fellBack) reason = `[No active ${role}; fell back to ${pick.role}] ${reason}`;
   const now = new Date();
   await d.update(employees).set({ lastAssignedAt: now }).where(eq(employees.id, chosen.id));
   await d.update(leads).set({ assignedToId: chosen.id, assignmentState: "open", updatedAt: now }).where(eq(leads.id, leadId));
-  await d.insert(assignments).values({ leadId, employeeId: chosen.id, role, strategy, reason });
+  await d.insert(assignments).values({ leadId, employeeId: chosen.id, role: pick.role, strategy, reason });
   return chosen;
 }
 
@@ -90,10 +92,11 @@ export async function processCall(callId: string) {
 
     // 3. assignment (once per lead status)
     let [lead] = await d.select().from(leads).where(eq(leads.id, leadId));
-    const role = roleForStatus(ev.status);
+    let role: "designer" | "front_desk" = roleForStatus(ev.status);
     let assignee = lead.assignedToId ? (await d.select().from(employees).where(eq(employees.id, lead.assignedToId)))[0] : undefined;
     if (!assignee || assignee.role !== role) assignee = await assignLead(leadId, ev.status, ev.reason);
     [lead] = await d.select().from(leads).where(eq(leads.id, leadId));
+    role = assignee.role === "designer" ? "designer" : "front_desk";
 
     // 4. side effects — independent, each failure is logged and retryable, none blocks the others
     const view: LeadView = lead;

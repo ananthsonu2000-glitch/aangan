@@ -21,3 +21,22 @@ export function pickAssignee<T extends Assignable>(pool: T[], strategy: Strategy
   const sorted = [...active].sort(strategy === "least_loaded" ? (a, b) => (openCounts[a.id] ?? 0) - (openCounts[b.id] ?? 0) || rr(a, b) : rr);
   return sorted[0];
 }
+
+/**
+ * Choose who gets the lead. Prefers the role for the status; if nobody active is in that pool, falls back to the other role
+ * rather than failing the whole pipeline (the fallback is reported so it can be shown in the assignment reason).
+ */
+export function pickWithFallback<T extends Assignable & { role: string }>(
+  all: T[],
+  status: "qualified" | "needs_recheck",
+  strategy: Strategy = "round_robin",
+  openCounts: Record<string, number> = {},
+): { assignee: T; role: string; fellBack: boolean } | null {
+  const wanted = roleForStatus(status);
+  const other = wanted === "designer" ? "front_desk" : "designer";
+  for (const role of [wanted, other]) {
+    const a = pickAssignee(all.filter((e) => e.role === role), strategy, openCounts);
+    if (a) return { assignee: a, role, fellBack: role !== wanted };
+  }
+  return null;
+}

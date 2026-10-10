@@ -16,7 +16,8 @@
     "simulate": "tsx scripts/simulate-webhook.ts",
     "resync": "tsx scripts/resync-lead.ts",
     "notify": "tsx scripts/notify-lead.ts",
-    "test:email": "tsx scripts/test-email.ts"
+    "test:email": "tsx scripts/test-email.ts",
+    "reprocess": "tsx scripts/reprocess-call.ts"
   },
   "dependencies": {
     "@neondatabase/serverless": "^1.0.0",

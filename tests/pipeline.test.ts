@@ -3,7 +3,7 @@ import { createHmac } from "node:crypto";
 import { normalizeVaaniPayload, normalizePhone, verifySignature, isTestEvent } from "@/lib/vaani";
 import { parseEvaluation, decideStatus } from "@/lib/qualification";
 import { evaluateLead } from "@/lib/gemini";
-import { pickAssignee, roleForStatus } from "@/lib/assignment";
+import { pickAssignee, roleForStatus, pickWithFallback } from "@/lib/assignment";
 import { buildEmail, buildTelegram, buildHubspotContact, buildHubspotDeal, type LeadView } from "@/lib/payloads";
 import { buildCalendarEvent, buildCalcomBooking, calendarProvider } from "@/lib/integrations";
 import { fetchRecording } from "@/lib/recording";
@@ -251,5 +251,20 @@ describe("Cal.com booking", () => {
     process.env.CALENDAR_PROVIDER = "google";
     expect(calendarProvider()).toBeNull();
     keys.forEach((k) => (saved[k] === undefined ? delete process.env[k] : (process.env[k] = saved[k])));
+  });
+});
+
+describe("assignment fallback", () => {
+  const e = (id: string, role: string, active: boolean) => ({ id, name: id, role, active, sortOrder: 1, lastAssignedAt: null });
+  it("falls back to the other role when the wanted pool has nobody active", () => {
+    const team = [e("alpha", "designer", true), e("fd1", "front_desk", false)];
+    const r = pickWithFallback(team, "needs_recheck")!;
+    expect(r).toMatchObject({ role: "designer", fellBack: true });
+    expect(r.assignee.id).toBe("alpha");
+  });
+  it("prefers the right role when available; null when nobody is active", () => {
+    const team = [e("alpha", "designer", true), e("fd1", "front_desk", true)];
+    expect(pickWithFallback(team, "needs_recheck")).toMatchObject({ role: "front_desk", fellBack: false });
+    expect(pickWithFallback([e("a", "designer", false)], "qualified")).toBeNull();
   });
 });
