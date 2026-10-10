@@ -132,3 +132,12 @@ export const appConfig = pgTable("app_config", {
 export type Employee = typeof employees.$inferSelect;
 export type Lead = typeof leads.$inferSelect;
 export type Call = typeof calls.$inferSelect;
+
+/** Webhook requests we rejected (bad signature / unparseable). Lets us see exactly what the provider sent. */
+export const webhookFailures = pgTable("webhook_failures", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  reason: text("reason").notNull(),
+  headers: jsonb("headers").notNull(),
+  body: text("body"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});

@@ -1,11 +1,19 @@
 import { NextResponse, after } from "next/server";
 import { eq } from "drizzle-orm";
-import { db, calls } from "@/db";
+import { db, calls, webhookFailures } from "@/db";
 import { normalizeVaaniPayload, normalizePhone, verifySignature } from "@/lib/vaani";
 import { processCall } from "@/lib/pipeline";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+async function logRejected(req: Request, reason: string, body: string) {
+  try {
+    const headers: Record<string, string> = {};
+    req.headers.forEach((v, k) => { headers[k] = /^(authorization|cookie|x-vercel-.*)$/i.test(k) ? "[redacted]" : v; });
+    await db().insert(webhookFailures).values({ reason, headers, body: body.slice(0, 20000) });
+  } catch (e) { console.error("could not log rejected webhook", e); }
+}
 
 export async function POST(req: Request) {
   const raw = await req.text();
@@ -13,13 +21,13 @@ export async function POST(req: Request) {
   const valid = verifySignature(raw, req.headers, secret, process.env.VAANI_SIGNATURE_HEADER || "x-vaani-signature");
   // Fail closed. Unsigned requests are only tolerated with an explicit dev flag and no secret configured.
   const devBypass = !secret && process.env.ALLOW_UNSIGNED_WEBHOOKS === "true" && process.env.NODE_ENV !== "production";
-  if (!valid && !devBypass) return NextResponse.json({ error: "invalid signature" }, { status: 401 });
+  if (!valid && !devBypass) { await logRejected(req, "invalid signature", raw); return NextResponse.json({ error: "invalid signature" }, { status: 401 }); }
 
   let body: any;
-  try { body = JSON.parse(raw); } catch { return NextResponse.json({ error: "invalid json" }, { status: 400 }); }
+  try { body = JSON.parse(raw); } catch { await logRejected(req, "invalid json", raw); return NextResponse.json({ error: "invalid json" }, { status: 400 }); }
 
   let n;
-  try { n = normalizeVaaniPayload(body); } catch (e) { return NextResponse.json({ error: String(e) }, { status: 422 }); }
+  try { n = normalizeVaaniPayload(body); } catch (e) { await logRejected(req, `unparseable: ${String(e)}`, raw); return NextResponse.json({ error: String(e) }, { status: 422 }); }
 
   const [row] = await db()
     .insert(calls)
