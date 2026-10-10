@@ -1,0 +1,10 @@
+.next
+node_modules
+.env
+.env.local
+npm-install.log
+*.tsbuildinfo
+next-env.d.ts
+dev.log
+.env*.local
+.claude/
